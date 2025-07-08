@@ -1,0 +1,100 @@
+<!-- owner_entity_le_clients_coupons_create -->
+<style>
+    .container-clients_select {
+        display: none;
+    }
+
+    .container-clients_select.show {
+        display: block;
+    }
+</style>
+<script>
+    const couponsEntityName = 'le_discount_coupons'
+    const sendCouponEntityName = 'le_clients_coupons'
+    const allowedClientsToCouponsEntityName = 'le_coupons_allowed_clients'
+    $(document).ready(async function () {
+        disableUnneeded()
+        initSendToHandler()
+        const couponId = getCouponId()
+        const couponData = await getCouponData(couponId)
+        setCouponDataToFields(couponData)
+        initSaveHandler(couponData)
+    })
+    function disableUnneeded() {
+        setTimeout(function () {
+            const couponInput = $('#coupon_number')
+            $([
+                couponInput[0]
+            ]).css({ 'background': '#e9ecef', 'pointer-events': 'none' });
+        }, 100)
+    }
+    function initSendToHandler() {
+        const sendToSelect = $('#send_to_option')
+        sendToSelect.on('change', function () {
+            const container = $('.container-clients_select')
+            if ($(this).val() == 'جميع العملاء') {
+                container.removeClass('show')
+            } else if ($(this).val() == 'عملاء محددون') {
+                container.addClass('show')
+            }
+        })
+    }
+    function getCouponId() {
+        const url = new URL(window.location.href);
+        const couponId = url.searchParams.get("coupon_id");
+        return couponId
+    }
+    async function getCouponData(couponId) {
+        const response = await fetch(`/v2/api/entity/${couponsEntityName}/${couponId}`)
+        const data = await response.json()
+        return data
+        console.log(data);
+    }
+    function setCouponDataToFields(couponData) {
+        const couponNumberInput = $('#coupon_number')
+        couponNumberInput.val(couponData['coupon'])
+    }
+    function initSaveHandler(couponData) {
+        const form = $(`#${sendCouponEntityName}`)
+        form.on('submit', async function (e) {
+            e.preventDefault()
+            const sendToOption = $('#send_to_option').val()
+            if (sendToOption == 'عملاء محددون') {
+                const clientsIds = $('#clients_select').val() || [];
+                await Promise.all(clientsIds.map(clientId => sendCoupon(clientId, couponData)));
+            } else {
+                await getAndSendAllClientsIds(couponData)
+            }
+            form.off('submit').submit()
+        })
+    }
+    async function getAndSendAllClientsIds(couponData) {
+        const response = await fetch('/v2/api/entity/client/list')
+        const data = await response.json()
+        const clientsIds = data.data.forEach(client => {
+            sendCoupon(client['id'], couponData)
+        })
+        return clientsIds
+    }
+    async function sendCoupon(clientId, couponData) {
+        const response = await fetch(`/v2/api/entity/${allowedClientsToCouponsEntityName}`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                client_id: clientId,
+                coupon_id: couponData.id,
+                coupon_number: couponData.coupon,
+                discount_type: couponData.discount_type,
+                discount_value: couponData.discount,
+                expiry_date: couponData.expiry_date,
+                uses_number: couponData.uses_number
+            })
+        });
+        if (!response.ok) {
+            throw new Error(`Failed with status ${response.status}`);
+        }
+        console.log(`Coupon sent to client ${clientId}`);
+    }
+</script>
