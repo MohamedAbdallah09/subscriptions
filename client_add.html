@@ -1,0 +1,22 @@
+<!-- code_Clients_owner_add -->
+<script>
+    $(document).ready(function () {
+        hideNotNeededInputs()
+        customizeState()
+    })
+    function hideNotNeededInputs() {
+        const firstPhone = document.querySelector('[for="ClientPhone1"]').parentElement.style.display = 'none'
+        const firstAddress = document.querySelector('[for="ClientAddress1"]').parentElement.style.display = 'none'
+        const secondAddress = document.querySelector('[for="ClientAddress2"]').parentElement.style.display = 'none'
+        const city = document.querySelector('[for="ClientCity"]').parentElement.style.display = 'none'
+        const postalCode = document.querySelector('[for="ClientPostalCode"]').parentElement.style.display = 'none'
+        const secondPhone = document.querySelector('[for="ClientPhone2"]').parentElement.style.width = '100%'
+        const state = document.querySelector('[for="ClientState"]').parentElement.style.width = '100%'
+    }
+    function customizeState() {
+        const $stateLabel = $('[for="ClientState"]');
+        const $stateInput = $('#ClientState');
+        $stateLabel.text('الحي السكني');
+    }
+
+</script>
