@@ -1,0 +1,54 @@
+<!-- code_Clients_owner_view -->
+<script>
+    const allowedClientsToCouponsEntityName = 'le_coupons_allowed_clients'
+    const subscriptionsEntityName = 'le_subscriptions'
+    $(document).ready(function () {
+        const tabUrl = `/v2/owner/entity/${allowedClientsToCouponsEntityName}/list?filter[client_id]=${client_id} .list-table`
+        addNewTab('الكوبونات', 'Coupons', 'allowed_coupons', tabUrl)
+        showAddSubcriptionButton()
+    })
+    function addNewTab(tab_name, tab_id, link_id, tab_url) {
+        let mobileDiv = $('.responsive.visible-sm')
+        if ($(mobileDiv).length != 0) {
+            let newNavTab = $('.responsive.visible-sm .panel').eq(0).clone()
+            newNavTab.removeClass('active')
+            newNavTab.html(`<div class="panel-heading">
+            <h4 class="panel-title">
+            <a class="accordion-toggle active collapsed" data-toggle="collapse" data-parent="#collapse-tabs-0" href="#collapse-${link_id}" id="mob_tab" aria-expanded="false"><span class="one-line">
+            ${tab_name} </span></a>
+            </h4></div>
+            <div id="collapse-${link_id}" class="panel-collapse collapse" aria-expanded="false" style=""><div class="panel-body" role="tabpanel" id="${link_id}"></div></div>
+            `)
+            $('.responsive.visible-sm').append(newNavTab)
+            $('#collapse-' + link_id).html('<div class="client-links"></div>');
+            $('#mob_tab').on('click', function () {
+                $(this).attr('aria-expanded', true)
+                $(this).removeClass('collapsed')
+                $(this).closest('.panel.panel-default').find('.client-links').load(tab_url);
+            })
+        } else {
+            let newNavTab = $('.nav-tabs.responsive li').eq(0).clone()
+            newNavTab.removeClass('active')
+            newNavTab.html(`<a class="nav-link" id="${link_id}" aria-controls="${tab_id}" role="tab" data-toggle="tab" href="#assetNotesExpenses" title="${tab_name}" aria-expanded="true"><span class="one-line"> ${tab_name} </span></a>`)
+            $('.nav-tabs.responsive').append(newNavTab)
+            $('div.tab-content').append(`<div class="tab-pane" id="${tab_id}"></div>`)
+            $('#' + link_id).on('click', function () {
+                $('ul.nav-tabs li').removeClass('active')
+                $('.tab-pane').removeClass('active')
+                $(this).parent().addClass('active')
+                $('#' + tab_id).addClass('active')
+                $('#' + tab_id).html('<div class="client-links"><table cellspacing="0" cellpadding="0" border="0" class="view-entry"></table></div>');
+                $('#' + tab_id).load(tab_url);
+            })
+        }
+    }
+    function showAddSubcriptionButton() {
+        const container = $('.invoice-actions')
+        const link = document.createElement('a')
+        link.className = 'btn btn-default btn-sm btn-5'
+        link.target = '_blank'
+        link.href = `/v2/owner/entity/${subscriptionsEntityName}/create?client_id=${client_id}`
+        link.innerHTML = '<i class="fa fa-money"></i> إضافة إشتراك'
+        container.append(link)
+    }
+</script>

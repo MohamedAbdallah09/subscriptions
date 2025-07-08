@@ -1,0 +1,357 @@
+<!-- owner_entity_le_orders_create -->
+<style>
+    .container-products_data {
+        display: none;
+    }
+</style>
+<script>
+    const subscriptionsEntityName = 'le_subscriptions'
+    const orderEntityName = 'le_orders'
+    let subscriptionData;
+    $(document).ready(function () {
+        disableUnneeded()
+        initSubscriptionChangeHandler()
+        initSaveHandler()
+    })
+
+    // Disable Inputs That Should Be Disabled
+    function disableUnneeded() {
+        setTimeout(function () {
+            const clientNameInput = $('#client_name')
+            const subscriptionDateInput = $('#subscription_date')
+            const expiryDateInput = $('#expiry_date')
+            const phoneInput = $('#client_phone')
+            const weightIdInput = $('#weight')
+            $([
+                clientNameInput[0],
+                subscriptionDateInput[0],
+                expiryDateInput[0],
+                phoneInput[0],
+                weightIdInput[0],
+            ]).css({ 'background': '#e9ecef', 'pointer-events': 'none' });
+        }, 100)
+    }
+
+    // Subscription Functions
+    function initSubscriptionChangeHandler() {
+        const subscriptionSelect = $('#subscription_id')
+        subscriptionSelect.on('change', async function () {
+            toggleLoadingSpinner(true)
+            const subscriptionId = $(this).val();
+            subscriptionData = await getSubscriptionData(subscriptionId);
+            const isValidSubscription = await validateSubscription(subscriptionData)
+            if (isValidSubscription) {
+                updateClientInputs(subscriptionData)
+                updateDatesInputs(subscriptionData)
+                updateWeightInput(subscriptionData)
+                await makeProductsTable(subscriptionData)
+            } else {
+                await disableSubscription(subscriptionData)
+            }
+            toggleLoadingSpinner(false)
+        })
+    }
+    async function getSubscriptionData(subscriptionId) {
+        const response = await fetch(`/v2/api/entity/${subscriptionsEntityName}/${subscriptionId}`);
+        const data = await response.json();
+        console.log(data);
+        return data
+    }
+    async function validateSubscription(subscriptionData) {
+        const currentDate = new Date()
+        const expiryDate = new Date(subscriptionData['expiry_date'])
+        currentDate.setHours(0, 0, 0, 0)
+        return ((expiryDate > currentDate))
+    }
+    async function disableSubscription(subscriptionData) {
+        const updatedData = { ...subscriptionData }
+        updatedData['status'] = 'غير نشط'
+        const response = await fetch(`/v2/api/entity/${subscriptionsEntityName}/${subscriptionData['id']}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'accept': 'application/json'
+            },
+            body: JSON.stringify(updatedData)
+        });
+        alert('الإشتراك غير نشط، الرجاء اختيار إشتراك آخر')
+        window.location.reload();
+    }
+
+    // On Subscription Change Functions
+    function updateClientInputs(subscriptionData) {
+        const clientData = subscriptionData['le_subscriptions_client_id']
+        const clientNameInput = $('#client_name');
+        const clientPhoneInput = $('#client_phone');
+        clientNameInput.val(clientData.business_name || '');
+        clientPhoneInput.val(clientData.phone2 || '');
+    }
+    function updateDatesInputs(subscriptionData) {
+        const subscriptionDateInput = $('#subscription_date');
+        const expiryDateInput = $('#expiry_date');
+        const subscriptionDate = formatDate(new Date(subscriptionData.subscription_date))
+        const expiryDate = formatDate(new Date(subscriptionData.expiry_date))
+        subscriptionDateInput.val(subscriptionDate || '');
+        expiryDateInput.val(expiryDate || '');
+    }
+    function formatDate(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}/${month}/${day}`;
+    }
+    function updateWeightInput(subscriptionData) {
+        const weightInput = $('#weight');
+        const weight = subscriptionData.le_subscriptions_weight_unit.weight || '';
+        weightInput.val(weight);
+    }
+
+    // Make Products Table
+    async function makeProductsTable(subscriptionData) {
+        const productsTable = document.getElementById('productsTable');
+        if (productsTable) {
+            productsTable.remove();
+        }
+        const products = subscriptionData['le_subscriptions_le_subscriptions_meal_items'];
+        const newProductsTable = document.createElement('table');
+        newProductsTable.className = 'table table-bordered table-striped';
+        newProductsTable.id = 'productsTable';
+        const productsData = await getProductsData(subscriptionData)
+        const productRows = await Promise.all(products.map(async (product) => {
+            console.log(product);
+            const productInfo = productsData[product['item_id']];
+            const productName = productInfo['product_name'];
+            const remainingQuantity = productInfo['remaining_quantity'];
+            return `
+                <tr>
+                    <td style="display: none;" class='product-id'>${product['item_id']}</td>
+                    <td class='product-name'>${productName}</td>
+                    <td class='product-total-quantity'>${product['quantity']}</td>
+                    <td class='product-remaining-quantity'>${remainingQuantity}</td>
+                    <td>
+                        <input type='number' class='form-control requested-quantity' min='0' max='${remainingQuantity}' required value='${remainingQuantity}'>
+                    </td>
+                </tr>
+            `;
+        }));
+        newProductsTable.innerHTML = `
+            <thead>
+                <tr>
+                    <th>اسم المنتج</th>
+                    <th>الكمية الكلية في الإشتراك</th>
+                    <th>الكمية المتبقية</th>
+                    <th>الكمية المطلوبة</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${productRows.join('')}
+            </tbody>
+        `;
+        $(`#${orderEntityName}`).append(newProductsTable);
+    }
+    async function getProductsData(subscriptionData) {
+        const response = await fetch(`/v2/api/entity/${orderEntityName}/list?filter[subscription_id]=${subscriptionData.id}`)
+        const data = await response.json();
+        const productData = await returnProductsData(data['data'], subscriptionData)
+        return productData
+    }
+    async function returnProductsData(orders, subscriptionData) {
+        const productsQuantitiesObject = {};
+        console.log(orders);
+        const productsInLastOrder = JSON.parse(orders[orders.length - 1]['products_data'])
+        const productsInSubscription = subscriptionData['le_subscriptions_le_subscriptions_meal_items']
+        if (productsInLastOrder.length < productsInSubscription.length) {
+            const products = productsInSubscription.slice(productsInLastOrder.length)
+            await initProducts(products, productsQuantitiesObject);
+        }
+        if (orders && orders.length > 0) {
+            for (const order of orders) {
+                const products = JSON.parse(order['products_data']);
+                for (const product of products) {
+                    const productId = product['product_id'];
+                    const requestedQuantity = parseInt(product['requested_quantity']);
+                    if (!productsQuantitiesObject[productId]) {
+                        const productName = product['product_name']
+                        productsQuantitiesObject[productId] = {
+                            requested_quantity: 0,
+                            remaining_quantity: product['total_quantity'],
+                            product_name: productName,
+                            total_quantity: product['total_quantity']
+                        };
+                    }
+                    productsQuantitiesObject[productId].requested_quantity += requestedQuantity;
+                    productsQuantitiesObject[productId].remaining_quantity -= requestedQuantity;
+                }
+            }
+        } else {
+            const products = subscriptionData['le_subscriptions_le_subscriptions_meal_items'];
+            await initProducts(products, productsQuantitiesObject);
+        }
+        console.log(productsQuantitiesObject);
+        return productsQuantitiesObject;
+    }
+    async function initProducts(products, productsQuantitiesObject) {
+        for (const product of products) {
+            console.log(product);
+            const productId = product['item_id'];
+            const remainingQuantity = parseInt(product['quantity']);
+            if (!productsQuantitiesObject[productId]) {
+                const productName = await getProductName(productId);
+                productsQuantitiesObject[productId] = {
+                    requested_quantity: 0,
+                    remaining_quantity: 0,
+                    product_name: productName,
+                    total_quantity: product['quantity']
+                };
+            }
+            productsQuantitiesObject[productId].remaining_quantity += remainingQuantity;
+        }
+    }
+    async function getProductName(productId) {
+        const response = await fetch(`/v2/api/entity/product/${productId}`);
+        const data = await response.json();
+        return data['name'];
+    }
+
+    // Handle Save
+    function initSaveHandler() {
+        const form = $(`#${orderEntityName}`);
+        async function formSubmitHandler(e) {
+            e.preventDefault();
+            toggleLoadingSpinner(true);
+            if (this.checkValidity()) {
+                const productsData = saveProductsData();
+                await calculateAndUseCredits(productsData)
+                form.off('submit', formSubmitHandler);
+                this.submit();
+            } else {
+                this.reportValidity();
+            }
+            toggleLoadingSpinner(false);
+        }
+        form.on('submit', formSubmitHandler);
+    }
+    function saveProductsData() {
+        const productsDataInput = $('#products_data')
+        const productsTable = $('#productsTable');
+        const productsData = [];
+        productsTable.find('tbody tr').each(function () {
+            const product_id = $(this).find('td.product-id').eq(0).text();
+            const total_quantity = $(this).find('td.product-total-quantity').eq(0).text();
+            const product_name = $(this).find('td.product-name').eq(0).text();
+            const remaining_quantity = $(this).find('td.product-remaining-quantity').eq(0).text();
+            const requested_quantity = $(this).find('input.requested-quantity').val();
+            productsData.push({
+                product_id,
+                product_name,
+                remaining_quantity,
+                requested_quantity,
+                total_quantity,
+            });
+        });
+        productsDataInput.val(JSON.stringify(productsData));
+        return productsData;
+    }
+    async function calculateAndUseCredits(productsData) {
+        const creditChargeData = JSON.parse(subscriptionData['credit_charge_id']);
+        for (const product of productsData) {
+            const productId = product['product_id'];
+            const creditCharge = creditChargeData.find(item => item.product_id == productId);
+            if (creditCharge) {
+                const creditChargeId = creditCharge['credit_charge_id'];
+                const creditTypeId = creditCharge['credit_type_id'];
+                const clientId = subscriptionData['le_subscriptions_client_id']['id'];
+                const creditUsageId = await getCreditUsageId(creditTypeId, clientId);
+                await useProductCredits(creditChargeId, product['requested_quantity'], creditUsageId);
+            }
+        }
+    }
+    async function getCreditUsageId(creditTypeId, clientId) {
+        const response = await fetch(`/v2/api/entity/credit_usage`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'accept': 'application/json'
+            },
+            body: JSON.stringify({
+                client_id: clientId,
+                credit_type_id: creditTypeId,
+                usage_date: new Date().toISOString().split('T')[0]
+            })
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Server Error: ${response.status} - ${errorText}`);
+        }
+        const result = await response.json();
+        return result['id']
+    }
+    async function useProductCredits(creditChargeId, requestedQuantity, creditUsageId) {
+        const response = await fetch(`/v2/api/entity/charge_usage`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'accept': 'application/json'
+            },
+            body: JSON.stringify({
+                amount: +requestedQuantity,
+                credit_charge_id: creditChargeId,
+                credit_usage_id: creditUsageId
+            })
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Server Error: ${response.status} - ${errorText}`);
+        }
+        const result = await response.json();
+        console.log('Credits used successfully:', result);
+    }
+
+    // Loading Spinner
+    function toggleLoadingSpinner(show) {
+        let spinner = document.getElementById("loadingSpinner");
+
+        if (show) {
+            // If the spinner doesn't exist, create it
+            if (!spinner) {
+                spinner = document.createElement("div");
+                spinner.id = "loadingSpinner";
+                spinner.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background-color: rgba(0, 0, 0, 0.5);
+                z-index: 1000000;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            `;
+
+                spinner.innerHTML = `
+                <div style="
+                    width: 80px;
+                    height: 80px;
+                    border: 8px solid rgba(255, 255, 255, 0.3);
+                    border-top: 8px solid white;
+                    border-radius: 50%;
+                    animation: spin 1s linear infinite;
+                "></div>
+                <style>
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                </style>
+            `;
+
+                document.body.appendChild(spinner);
+            } else {
+                spinner.style.display = "flex";
+            }
+        } else if (spinner) {
+            spinner.style.display = "none";
+        }
+    }
+</script>

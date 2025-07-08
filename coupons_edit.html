@@ -1,0 +1,163 @@
+<!-- owner_entity_le_discount_coupons_edit  -->
+<style>
+    .container-quopon_status,
+    .container-send_to_clients {
+        display: none;
+    }
+
+    .container-send_to_clients.show {
+        display: block;
+    }
+</style>
+<script>
+    const couponsEntityName = 'le_discount_coupons'
+    const allowedClientsToCouponsEntityName = 'le_coupons_allowed_clients'
+
+    $(document).ready(function () {
+        disableUnneeded()
+        initSendToChangeHandler()
+        initSaveHandler()
+    })
+    // Disable Inputs That Should Be Disabled
+    function disableUnneeded() {
+        setTimeout(function () {
+            const couponNumber = $('#coupon')
+            const discountType = $('.container-discount_type .select2.select2-container')
+            const discountValue = $('#discount')
+            const usesNumber = $('#uses_number')
+            const expiryDate = $('.container-expiry_date input[type="text"]');
+            const releaseDate = $('.container-release_date input[type="text"]');
+            const validityDaysNumber = $('#validity_days_number')
+            $([
+                couponNumber[0],
+                discountType[0],
+                discountValue[0],
+                usesNumber[0],
+                expiryDate[0],
+                releaseDate[0],
+                validityDaysNumber[0]
+            ]).css({ 'background': '#e9ecef', 'pointer-events': 'none' });
+        }, 100)
+    }
+    // Send To Clients Functions
+    function initSendToChangeHandler() {
+        const sendToSelect = $('#send_to_option')
+        sendToSelect.on('change', function () {
+            const container = $('.container-send_to_clients')
+            if ($(this).val() == 'جميع العملاء') {
+                container.removeClass('show')
+            } else if ($(this).val() == 'عملاء محددون') {
+                container.addClass('show')
+            }
+        })
+        sendToSelect.trigger('change')
+    }
+    function initSaveHandler() {
+        const form = $(`#${couponsEntityName}`)
+        async function formSubmitHandler(e) {
+            e.preventDefault();
+            toggleLoadingSpinner(true)
+            if (this.checkValidity()) {
+                const sendToOption = $('#send_to_option').val()
+                const couponData = getCouponData()
+                let clientsIds
+                if (sendToOption == 'عملاء محددون') {
+                    clientsIds = $('#send_to_clients').val() || [];
+                } else {
+                    clientsIds = await getAllClientsIds() || [];
+                }
+                for (const clientId of clientsIds) {
+                    await sendCoupon(clientId, couponData);
+                }
+                form.off('submit', formSubmitHandler);
+                this.submit()
+            } else {
+                this.reportValidity();
+            }
+            toggleLoadingSpinner(false)
+        }
+        form.on('submit', formSubmitHandler);
+    }
+    function getCouponData() {
+        const couponData = {
+            coupon: $('#coupon').val(),
+            discount_type: $('#discount_type').val(),
+            discount_value: $('#discount').val(),
+            uses_number: $('#uses_number').val(),
+            expiry_date: $('#expiry_date').val()
+        };
+        return couponData
+    }
+    async function getAllClientsIds() {
+        const response = await fetch('/v2/api/entity/client/list')
+        const data = await response.json()
+        const clientsIds = data.data.map(client => client['id'])
+        return clientsIds
+    }
+    async function sendCoupon(clientId, couponData) {
+        const response = await fetch(`/v2/api/entity/${allowedClientsToCouponsEntityName}`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                client_id: clientId,
+                coupon_number: couponData.coupon,
+                discount_type: couponData.discount_type,
+                discount_value: couponData.discount_value,
+                expiry_date: couponData.expiry_date,
+                uses_number: couponData.uses_number,
+                previous_usage_count: 0,
+                coupon_status: 'نشط'
+            })
+        });
+        if (!response.ok) {
+            throw new Error(`Failed with status ${response.status}`);
+        }
+        console.log(`Coupon sent to client ${clientId}`);
+    }
+    function toggleLoadingSpinner(show) {
+        let spinner = document.getElementById("loadingSpinner");
+        if (show) {
+            // If the spinner doesn't exist, create it
+            if (!spinner) {
+                spinner = document.createElement("div");
+                spinner.id = "loadingSpinner";
+                spinner.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background-color: rgba(0, 0, 0, 0.5);
+                z-index: 1000000;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            `;
+                spinner.innerHTML = `
+                <div style="
+                    width: 80px;
+                    height: 80px;
+                    border: 8px solid rgba(255, 255, 255, 0.3);
+                    border-top: 8px solid white;
+                    border-radius: 50%;
+                    animation: spin 1s linear infinite;
+                "></div>
+                <style>
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                </style>
+            `;
+                document.body.appendChild(spinner);
+            } else {
+                spinner.style.display = "flex";
+            }
+        } else if (spinner) {
+            spinner.style.display = "none";
+        }
+    }
+
+</script>

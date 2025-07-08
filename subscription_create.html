@@ -1,0 +1,556 @@
+<!-- owner_entity_le_subscriptions_create -->
+<style>
+    .container-credit_charge_id,
+    .container-status {
+        display: none;
+    }
+</style>
+<script>
+    const subscriptionsEntityName = 'le_subscriptions'
+    const pricingEntityName = 'le_pricinig'
+    const couponsEntityName = 'le_discount_coupons'
+    const allowedClientsToCouponsEntityName = 'le_coupons_allowed_clients'
+    const creditsTypesEntityName = 'le_credits_types'
+    $(document).ready(function () {
+        disableUnneeded()
+        initProductAlreadyAddedHandler()
+        initClientChangeHandler()
+        initWeightChangeHandler()
+        initDatesChangeHandler()
+        addCheckCouponButton()
+        initTaxTypeChangeHandler()
+        initRowRemoveHandler();
+        initSaveHandler()
+    })
+
+    // Disable Inputs That Should Be Disabled
+    function disableUnneeded() {
+        setTimeout(function () {
+            const subscriptionDateDisplay = $('.container-subscription_date input[type="text"]');
+            const expiryDateDisplay = $('.container-expiry_date input[type="text"]');
+            const totalBeforeDiscountInput = $('#total_before_discount')
+            const totalAfterDiscountInput = $('#total_after_discount')
+            const totalAfterTaxInput = $('#total_after_tax')
+            const taxInput = $('#tax_value')
+            const discountInput = $('#discount_value')
+            const phoneInput = $('input#client_phone')
+            $([
+                subscriptionDateDisplay[0],
+                expiryDateDisplay[0],
+                totalBeforeDiscountInput[0],
+                totalAfterDiscountInput[0],
+                totalAfterTaxInput[0],
+                taxInput[0],
+                discountInput[0],
+                // phoneInput[0]
+            ]).css({ 'background': '#e9ecef', 'pointer-events': 'none' });
+        }, 100)
+    }
+
+    // Handle Save Subscription functions
+    function initSaveHandler() {
+        const form = $(`#${subscriptionsEntityName}`);
+        async function formSubmitHandler(e) {
+            e.preventDefault();
+            toggleLoadingSpinner(true);
+            if (this.checkValidity() && checkDisabledInputs()) {
+                await handleCoupon()
+                await handleCreditType()
+                form.off('submit', formSubmitHandler);
+                this.submit();
+            } else {
+                this.reportValidity();
+            }
+            toggleLoadingSpinner(false);
+        }
+        form.on('submit', formSubmitHandler);
+    }
+    function checkDisabledInputs() {
+        const disabledInputs = $('input#expiry_date');
+        let allValid = true;
+        disabledInputs.each(function () {
+            if (!this.value) {
+                allValid = false;
+                this.setCustomValidity('هذا الحقل مطلوب');
+            } else {
+                this.setCustomValidity('');
+            }
+        });
+        return allValid;
+    }
+    async function handleCoupon() {
+        const couponData = await getCouponData();
+        if (couponData) {
+            const isValidCoupon = await validateCoupon(couponData);
+            if (isValidCoupon) {
+                await increaseCouponUsageCount(couponData);
+            }
+        }
+    }
+    async function handleCreditType() {
+        const products = [];
+        const productRows = $('.sortable-dynamic-rows .sortable-dynamic-rows-row div.form-row');
+        const extractedProducts = productRows.map(function () {
+            return {
+                item_id: $(this).find('select[id*="item_id"]').val(),
+                quantity: $(this).find('input[id*="quantity"]').val()
+            };
+        }).get();
+        products.push(...extractedProducts);
+        console.log("Products IDs:", products);
+        const clientId = $('#client_id').val();
+        let creditChargeData = [];
+        for (const product of products) {
+            const creditTypeId = await getCreditTypeId(product.item_id);
+            const productData = await getProductData(product.item_id);
+            if (creditTypeId) {
+                console.log("Already Has Credit Type Id");
+                creditChargeData.push({
+                    credit_charge_id: await addCreditToClient(creditTypeId, clientId, product),
+                    product_id: product.item_id,
+                    credit_type_id: creditTypeId
+                });
+            } else {
+                console.log("Doesnt Have Credit Type Id");
+                const result = await createAndReturnCreditTypeId(productData);
+                if (result.id) {
+                    creditChargeData.push({
+                        credit_charge_id: await addCreditToClient(result.id, clientId, product),
+                        product_id: product.item_id,
+                        credit_type_id: result.id
+                    });
+                    await addCreditTypeIdToEntity(product.item_id, result.id);
+                }
+            }
+        }
+        saveCreditChargeData(creditChargeData);
+        console.log("Credit Charge Data:", creditChargeData);
+    }
+    async function getCreditTypeId(productId) {
+        const response = await fetch(`/v2/api/entity/${creditsTypesEntityName}/list?filter[product_id]=${productId}`);
+        const data = await response.json();
+        return data['data'].length > 0 ? data['data'][0]['credit_type_id'] : false;
+    }
+    async function addCreditToClient(creditTypeId, clientId, product) {
+        const startDate = $('.container-subscription_date input[type="text"]').val();
+        const expiryDate = $('.container-expiry_date input[type="text"]').val();
+        const creditData = {
+            credit_type_id: creditTypeId,
+            client_id: clientId,
+            amount: product.quantity,
+            start_date: startDate,
+            expiry_date: expiryDate
+        }
+        try {
+            const response = await fetch('/v2/api/credit_charges', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(creditData)
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Server Error: ${response.status} - ${errorText}`);
+            }
+            const result = await response.json();
+            console.log('Credit type Added successfully:', result);
+            return result['data']['id'];
+        } catch (error) {
+            console.error('Error creating credit type:', error);
+        }
+    }
+    async function createAndReturnCreditTypeId(productData) {
+        console.log(productData);
+        const creditTypeData = {
+            name: productData.name,
+            unit: productData.name,
+        };
+        console.log(creditTypeData);
+        try {
+            const response = await fetch('/v2/api/entity/credit_type', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'accept': 'application/json'
+                },
+                body: JSON.stringify(creditTypeData)
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Server Error: ${response.status} - ${errorText}`);
+            }
+            const result = await response.json();
+            console.log('Credit type created successfully:', result);
+            return result;
+        } catch (error) {
+            console.error('Error creating credit type:', error);
+        }
+    }
+    async function getProductData(productId) {
+        const response = await fetch(`/v2/api/entity/product/${productId}`);
+        const data = await response.json();
+        return data;
+    }
+    async function addCreditTypeIdToEntity(productId, creditTypeId) {
+        console.log("Product Id:" + productId);
+        console.log("credit Type Id:" + creditTypeId);
+        const data = { product_id: productId, credit_type_id: creditTypeId };
+        try {
+            const response = await fetch(`/v2/api/entity/${creditsTypesEntityName}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'accept': 'application/json'
+                },
+                body: JSON.stringify(data)
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Server Error: ${response.status} - ${errorText}`);
+            }
+            const result = await response.json();
+            console.log('Credit type ID added successfully:', result);
+            return result;
+        } catch (error) {
+            console.error('Error adding credit type ID:', error);
+        }
+    }
+    function saveCreditChargeData(creditChargeData) {
+        const creditChargeDataInput = $('#credit_charge_id');
+        if (creditChargeDataInput) {
+            creditChargeDataInput.val(JSON.stringify(creditChargeData));
+        }
+    }
+
+    // Handle Client Change Functions
+    async function initClientChangeHandler() {
+        toggleLoadingSpinner(true)
+        const params = new URLSearchParams(window.location.search)
+        const clientSelect = $('#client_id')
+        clientSelect.on('change', async function () {
+            toggleLoadingSpinner(true)
+            const clientId = $(this).val()
+            const clientData = await getClientData(clientId)
+            const phoneInput = $('input#client_phone')
+            phoneInput.val(clientData['phone2'])
+            toggleLoadingSpinner(false)
+            recalculateTotals()
+        })
+        if (params.get('client_id')) {
+            const clientId = params.get('client_id')
+            const clientData = await getClientData(clientId)
+            clientSelect.append(`<option value="${clientId}">${clientData['business_name']}</option>`)
+            clientSelect.val(clientId).trigger('change')
+        }
+        toggleLoadingSpinner(false)
+    }
+    async function getClientData(clientId) {
+        const response = await fetch(`/v2/api/entity/client/${clientId}`)
+        const data = await response.json()
+        return data
+    }
+
+    // Handle Date Change Functions
+    function initDatesChangeHandler() {
+        setTimeout(function () {
+            const validityDaysNumberInput = $('input#validity_days_number')
+            const subscriptionDateInput = $('input#subscription_date')
+            validityDaysNumberInput.on('input', function () {
+                updateExpiryDate(subscriptionDateInput, validityDaysNumberInput)
+            });
+        })
+    }
+    function updateExpiryDate(subscriptionDateInput, validityDaysNumberInput) {
+        const subscriptionDate = subscriptionDateInput.val();
+        const validityDays = parseInt(validityDaysNumberInput.val(), 10);
+        const expiryDateDisplay = $('.container-expiry_date').find('input[type="text"]');
+        if (subscriptionDate && !isNaN(validityDays)) {
+            const expiryDate = calculateExpiryDate(subscriptionDate, validityDays);
+            expiryDateDisplay.val(expiryDate).trigger('change')
+        } else {
+            expiryDateDisplay.val('').trigger('change');
+        }
+    }
+    function calculateExpiryDate(startDateStr, days) {
+        const date = new Date(startDateStr);
+        date.setDate(date.getDate() + days);
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        return `${day}/${month}/${year}`;
+    }
+
+    // Handle Weight Change Functions
+    function initWeightChangeHandler() {
+        const weightSelect = $('#weight_unit');
+        weightSelect.on('change', async function () {
+            initQuantityInputChangeHandler();
+            recalculateTotals();
+        });
+    }
+    async function getWeightData(weightId) {
+        const response = await fetch(`/v2/api/entity/${pricingEntityName}/${weightId}`);
+        const data = await response.json();
+        return data;
+    }
+
+    // Handle Product Already Added
+    function initProductAlreadyAddedHandler() {
+        $(document).on('change', 'select[id*="item_id"]', function () {
+            const selectedItemId = $(this).val();
+            const currentRow = $(this).closest('.sortable-dynamic-rows-row');
+            const allRows = $('.sortable-dynamic-rows-row');
+            allRows.each(function () {
+                if ($(this).find('select[id*="item_id"]').val() === selectedItemId && $(this)[0] !== currentRow[0]) {
+                    $(currentRow).find('button.remove-row').trigger('click')
+                }
+            });
+        });
+    }
+
+    // Handle Quantity Change
+    function initQuantityInputChangeHandler() {
+        $(document).off('change', 'input[id*="quantity"]');
+        $(document).on('change', 'input[id*="quantity"]', function () {
+            recalculateTotals();
+        });
+    }
+
+    // Handle Row Remove Functions
+    function initRowRemoveHandler() {
+        $(document).on('click', 'button.remove-row', function () {
+            recalculateTotals();
+        });
+    }
+
+    // Coupon Functions
+    function addCheckCouponButton() {
+        const couponInput = $('#sale_coupon');
+        couponInput.wrap('<div class="input-group"></div>');
+        const checkButton = $('<button>', {
+            type: 'button',
+            class: 'btn btn-primary',
+            id: 'check_coupon',
+            text: 'تحقق'
+        });
+        const inputGroupAppend = $('<div>', { class: 'input-group-append' }).append(checkButton);
+        couponInput.after(inputGroupAppend);
+        initCheckCouponHandler()
+    }
+    function initCheckCouponHandler() {
+        const checkButton = $('#check_coupon')
+        checkButton.on('click', async function () {
+            recalculateTotals()
+        })
+    }
+    async function getCouponData() {
+        const enteredCoupon = $('#sale_coupon').val();
+        const clientId = $('#client_id').val()
+        if (enteredCoupon && clientId) {
+            const response = await fetch(`/v2/api/entity/${allowedClientsToCouponsEntityName}/list?filter[client_id]=${clientId}&filter[coupon_number]=${enteredCoupon}&filter[coupon_status]=نشط`)
+            const data = await response.json()
+            if (data['data'].length) {
+                return data['data'][0]
+            }
+        }
+        return false
+    }
+    async function validateCoupon(couponData) {
+        const currentDate = new Date()
+        const expiryDate = new Date(couponData['expiry_date'])
+        currentDate.setHours(0, 0, 0, 0)
+        const maxUsesNumber = parseFloat(couponData['uses_number'])
+        const previousUsageCount = parseFloat(couponData['previous_usage_count'])
+        return ((expiryDate > currentDate) && (maxUsesNumber > previousUsageCount))
+    }
+    async function disableCoupon(couponData) {
+        const updatedData = { ...couponData }
+        updatedData['coupon_status'] = 'غير نشط'
+        const response = await fetch(`/v2/api/entity/${allowedClientsToCouponsEntityName}/${couponData['id']}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'accept': 'application/json'
+            },
+            body: JSON.stringify(updatedData)
+        });
+    }
+    async function getDiscountValue(couponData, pricingData) {
+        if (couponData['discount_type'] == 'قيمة') {
+            return couponData['discount_value']
+        } else if (couponData['discount_type'] == 'نسبة') {
+            return handleDiscountIsPercent(couponData['discount_value'], pricingData)
+        }
+    }
+    async function handleDiscountIsPercent(discountPercent, pricingData) {
+        const discountInput = $('#discount_value')
+        const quantityValues = getAllQuantityValues();
+        const subtotal = calculateSubtotal(quantityValues, pricingData)
+        return (subtotal * (discountPercent / 100))
+    }
+    async function increaseCouponUsageCount(couponData) {
+        const updatedData = { ...couponData }
+        updatedData['previous_usage_count'] = parseInt(updatedData['previous_usage_count'] || 0) + 1
+        const maxUsesNumber = parseFloat(updatedData['uses_number'])
+        const usageCount = parseFloat(updatedData['previous_usage_count'])
+        if (maxUsesNumber == usageCount) {
+            updatedData['coupon_status'] = 'غير نشط'
+        }
+        const response = await fetch(`/v2/api/entity/${allowedClientsToCouponsEntityName}/${couponData['id']}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'accept': 'application/json'
+            },
+            body: JSON.stringify(updatedData)
+        });
+    }
+
+    // Handle Tax
+    function initTaxTypeChangeHandler() {
+        const taxTypeSelect = $('#tax_type')
+        taxTypeSelect.on('change', async function () {
+            recalculateTotals()
+        })
+    }
+    async function getTaxData(taxId) {
+        const response = await fetch(`/v2/api/entity/tax/${taxId}`)
+        const data = await response.json()
+        return data
+    }
+    function getTaxValue(taxData, totalAfterDiscount) {
+        const taxPercent = taxData['value']
+        if (taxData['included'] == 0) {
+            const taxValue = (totalAfterDiscount * (taxPercent / 100))
+            return taxValue
+        } else if (taxData['included'] == 1) {
+            const taxValue = totalAfterDiscount * (taxPercent / (100 + taxPercent));
+            //  Price Without Included Tax If Needed In The Future
+            const priceWithoutTax = totalAfterDiscount - taxValue;
+            console.log("Price Without Included Tax If Needed In The Future: " + priceWithoutTax);
+            return taxValue
+        }
+    }
+
+    // Calculating Prices/Discounts/Tax Functions
+    function getAllQuantityValues() {
+        return $('input[id*="quantity"]').map(function () {
+            return parseFloat($(this).val()) || 0;
+        }).get();
+    }
+    function findPriceForQuantity(quantity, pricingData) {
+        const match = pricingData.find(item =>
+            quantity >= item.quantity_from && quantity <= item.quantity_to
+        );
+        return match ? match.price : 0;
+    }
+    function calculateSubtotal(quantityValues, pricingData) {
+        return quantityValues.reduce((sum, qty) => {
+            return sum + findPriceForQuantity(qty, pricingData);
+        }, 0);
+    }
+    async function updateTotalFields(subtotal, taxValue, discountValue, isTaxIncluded) {
+        const totalBeforeDiscountInput = $('#total_before_discount');
+        const discountValueInput = $('#discount_value')
+        const totalAfterTaxInput = $('#total_after_tax');
+        const taxValueInput = $('#tax_value')
+        const totalAfterDiscountInput = $('#total_after_discount');
+        const totalAfterDiscount = subtotal - discountValue;
+        const totalAfterTaxValue = isTaxIncluded ? totalAfterDiscount : totalAfterDiscount + taxValue
+        discountValueInput.val(discountValue.toFixed())
+        taxValueInput.val(taxValue.toFixed())
+        totalBeforeDiscountInput.val(subtotal.toFixed());
+        totalAfterDiscountInput.val(totalAfterDiscount.toFixed());
+        if (isTaxIncluded) {
+            totalAfterTaxInput.val(totalAfterDiscount.toFixed())
+        } else {
+            totalAfterTaxInput.val(totalAfterTaxValue.toFixed())
+        }
+    }
+    async function recalculateTotals() {
+        toggleLoadingSpinner(true)
+        const weightId = $('#weight_unit').val();
+        if (weightId) {
+            const weightData = await getWeightData(weightId);
+            const pricingData = weightData['le_pricinig_le_pricinig_pricing_form'] || [];
+            const quantityValues = getAllQuantityValues();
+            const subtotal = calculateSubtotal(quantityValues, pricingData);
+            let taxValue
+            let isTaxIncluded = false
+            const taxId = $('#tax_type').val()
+            let discountValue;
+            const couponData = await getCouponData()
+            console.log(couponData);
+            if (couponData) {
+                const isValidCoupon = await validateCoupon(couponData)
+                if (isValidCoupon) {
+                    discountValue = await getDiscountValue(couponData, pricingData)
+                } else {
+                    await disableCoupon(couponData)
+                    discountValue = 0
+                }
+            } else {
+                discountValue = 0
+            }
+            if (taxId) {
+                const taxData = await getTaxData(taxId)
+                taxValue = getTaxValue(taxData, subtotal - discountValue)
+                isTaxIncluded = !!taxData['included']
+            } else {
+                taxValue = 0;
+            }
+            updateTotalFields(subtotal, parseFloat(taxValue), parseFloat(discountValue), isTaxIncluded);
+        }
+        toggleLoadingSpinner(false)
+    }
+
+    // Loading Spinner
+    function toggleLoadingSpinner(show) {
+        let spinner = document.getElementById("loadingSpinner");
+
+        if (show) {
+            // If the spinner doesn't exist, create it
+            if (!spinner) {
+                spinner = document.createElement("div");
+                spinner.id = "loadingSpinner";
+                spinner.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background-color: rgba(0, 0, 0, 0.5);
+                z-index: 1000000;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            `;
+
+                spinner.innerHTML = `
+                <div style="
+                    width: 80px;
+                    height: 80px;
+                    border: 8px solid rgba(255, 255, 255, 0.3);
+                    border-top: 8px solid white;
+                    border-radius: 50%;
+                    animation: spin 1s linear infinite;
+                "></div>
+                <style>
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                </style>
+            `;
+
+                document.body.appendChild(spinner);
+            } else {
+                spinner.style.display = "flex";
+            }
+        } else if (spinner) {
+            spinner.style.display = "none";
+        }
+    }
+
+</script>

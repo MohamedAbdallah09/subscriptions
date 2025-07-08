@@ -1,0 +1,138 @@
+<!-- owner_entity_le_pricinig_create -->
+<style>
+    .alert-container {
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.3s ease;
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 100%;
+        width: 100%;
+        background-color: rgba(0, 0, 0, 0.241);
+        z-index: 999999;
+    }
+
+    /* Show state */
+    .alert-container.show {
+        opacity: 1;
+        visibility: visible;
+    }
+
+    /* Floating popup */
+    .floating-alert {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        background-color: white;
+        color: #333;
+        padding: 15px 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        width: 50%;
+        text-align: center;
+        font-family: Arial, sans-serif;
+        transform: translate(-50%, -60%);
+        opacity: 0;
+        transition: transform 0.4s ease, opacity 0.4s ease;
+    }
+
+    /* Show state for popup */
+    .alert-container.show .floating-alert {
+        transform: translate(-50%, -50%);
+        opacity: 1;
+    }
+
+    /* Buttons */
+    .floating-alert .buttons {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .floating-alert p {
+        font-size: 32px;
+        font-weight: bold;
+    }
+</style>
+<div class="alert-container">
+    <div class="floating-alert">
+        <p>هذا الوزن مضاف بالفعل</p>
+        <div class="buttons">
+            <button class="back btn btn-secondary">العودة</button>
+            <a class="edit-existing-weight btn btn-success" target="_blank">تعديل الأسعار</a>
+        </div>
+    </div>
+</div>
+<script>
+    const entityName = 'le_pricinig'
+    let addedBeforeId
+    $(document).ready(function () {
+        forceFirstRowQuantityFromValue();
+        handleAddButtonClick();
+        handleSave()
+    });
+    function forceFirstRowQuantityFromValue() {
+        const firstRow = $('.sortable-dynamic-rows-row').first();
+        const quantityFromInput = firstRow.find('[id*="quantity_from"]');
+        const removeRowButton = firstRow.find('button.remove-row');
+        console.log(removeRowButton);
+        quantityFromInput.val(1);
+        $([quantityFromInput[0], removeRowButton[0]]).css({ 'pointer-events': 'none' });
+        $(quantityFromInput[0]).css({ 'background': '#e9ecef' });
+    }
+    function handleAddButtonClick() {
+        const addButton = $('.btn-group.add-row button');
+        addButton.on('click', function () {
+            setTimeout(function () {
+                const rows = $('.sortable-dynamic-rows-row');
+                const quantityToValue = rows.eq(-2).find('[id*="quantity_to"]').val();
+                const $quantityFrom = rows.last().find('[id*="quantity_from"]');
+                const newValue = parseInt(quantityToValue, 10) + 1;
+                $quantityFrom.val(newValue);
+            })
+        });
+    }
+    function handleSave() {
+        const form = $('#le_pricinig')
+        form.on('submit', async function (e) {
+            e.preventDefault()
+            const weightAddedBefore = await isWeightAddedBefore()
+            if (weightAddedBefore) {
+                showFloatingAlert()
+            } else {
+                console.log('submitted');
+                form.off('submit');
+                form.submit()
+            }
+        })
+    }
+    async function isWeightAddedBefore() {
+        const currentWeight = $('#weight').val()
+        const response = await fetch(`/v2/api/entity/${entityName}/list?filter[weight]=${currentWeight}`)
+        const data = await response.json()
+        if (data.data.length) {
+            addedBeforeId = data.data[0]['id']
+        }
+        return data.data.length > 0
+    }
+    function showFloatingAlert() {
+        const alertDiv = document.querySelector('.alert-container');
+        alertDiv.classList.add('show');
+        handleExitFloatingAlert();
+        handleEditExistigWeight();
+    }
+
+    function handleExitFloatingAlert() {
+        $('.alert-container .buttons button.back').on('click', function () {
+            const alertDiv = document.querySelector('.alert-container');
+            alertDiv.classList.remove('show');
+            window.location.reload()
+        });
+    }
+
+    function handleEditExistigWeight() {
+        $('.alert-container .buttons a.edit-existing-weight')
+            .attr('href', `/v2/owner/entity/${entityName}/${addedBeforeId}/edit`);
+    }
+</script>

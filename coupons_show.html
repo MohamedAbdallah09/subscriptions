@@ -1,0 +1,24 @@
+<!-- owner_entity_le_discount_coupons_show -->
+<script>
+    const couponsEntityName = 'le_discount_coupons'
+    const sendCouponEntityName = 'le_clients_coupons'
+    $(document).ready(function () {
+        const couponId = getCouponId()
+        addSendCouponLink(couponId)
+    })
+    function getCouponId() {
+        const url = window.location.href;
+        const parts = url.split("/");
+        const id = parts[parts.indexOf(couponsEntityName) + 1];
+        return id
+    }
+    function addSendCouponLink(couponId) {
+        const container = $('.card-header .btn-group')
+        const link = document.createElement('a')
+        link.className = 'btn btn-light'
+        link.innerHTML = '<i class="mdi mdi-send mr-1"></i> إرسال إالى عملاء'
+        link.href = `/v2/owner/entity/${sendCouponEntityName}/create?coupon_id=${couponId}`
+        link.target = '_blank'
+        container.append(link)
+    }
+</script>

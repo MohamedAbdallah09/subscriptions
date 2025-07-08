@@ -1,0 +1,37 @@
+<!-- owner_entity_le_pricinig_edit -->
+<script>
+    $(document).ready(function () {
+        disableUnneeded()
+        forceFirstRowQuantityFromValue()
+        handleAddButtonClick()
+    })
+    function disableUnneeded() {
+        setTimeout(function () {
+            const weight = $('#weight')
+            $([
+                weight[0]
+            ]).css({ 'background': '#e9ecef', 'pointer-events': 'none' });
+        }, 100)
+    }
+    function forceFirstRowQuantityFromValue() {
+        const firstRow = $('.sortable-dynamic-rows-row').first();
+        const quantityFromInput = firstRow.find('[id*="quantity_from"]');
+        const removeRowButton = firstRow.find('button.remove-row');
+        console.log(removeRowButton);
+        quantityFromInput.val(1);
+        $([quantityFromInput[0], removeRowButton[0]]).css({ 'pointer-events': 'none' });
+        $(quantityFromInput[0]).css({ 'background': '#e9ecef' });
+    }
+    function handleAddButtonClick() {
+        const addButton = $('.btn-group.add-row button');
+        addButton.on('click', function () {
+            setTimeout(function () {
+                const rows = $('.sortable-dynamic-rows-row');
+                const quantityToValue = rows.eq(-2).find('[id*="quantity_to"]').val();
+                const $quantityFrom = rows.last().find('[id*="quantity_from"]');
+                const newValue = parseInt(quantityToValue, 10) + 1;
+                $quantityFrom.val(newValue);
+            })
+        });
+    }
+</script>
