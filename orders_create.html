@@ -158,13 +158,13 @@
     async function returnProductsData(orders, subscriptionData) {
         const productsQuantitiesObject = {};
         console.log(orders);
-        const productsInLastOrder = JSON.parse(orders[orders.length - 1]['products_data'])
-        const productsInSubscription = subscriptionData['le_subscriptions_le_subscriptions_meal_items']
-        if (productsInLastOrder.length < productsInSubscription.length) {
-            const products = productsInSubscription.slice(productsInLastOrder.length)
-            await initProducts(products, productsQuantitiesObject);
-        }
         if (orders && orders.length > 0) {
+            const productsInLastOrder = JSON.parse(orders[orders.length - 1]['products_data'])
+            const productsInSubscription = subscriptionData['le_subscriptions_le_subscriptions_meal_items']
+            if (productsInLastOrder.length < productsInSubscription.length) {
+                const products = productsInSubscription.slice(productsInLastOrder.length)
+                await initProducts(products, productsQuantitiesObject);
+            }
             for (const order of orders) {
                 const products = JSON.parse(order['products_data']);
                 for (const product of products) {

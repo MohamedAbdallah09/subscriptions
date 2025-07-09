@@ -1,7 +1,8 @@
 <!-- owner_entity_le_subscriptions_edit -->
 <style>
     .container-credit_charge_id,
-    .container-status {
+    .container-status,
+    .container-invoice_id {
         display: none;
     }
 
@@ -21,9 +22,12 @@
     const allowedClientsToCouponsEntityName = 'le_coupons_allowed_clients'
     const creditsTypesEntityName = 'le_credits_types'
     let previousCouponDecreased = false;
+    let pricingData;
     $(document).ready(function () {
         const couponInput = $('#sale_coupon');
         const previousCoupon = couponInput.val();
+        checkIfInvoiceIsDeleted()
+        getPricingData()
         disableUnneeded()
         initProductAlreadyAddedHandler()
         initQuantityInputChangeHandler()
@@ -38,14 +42,17 @@
     })
 
     // Handle Save Subscription functions
-    function initSaveHandler(previousCoupon) {
+    function initSaveHandler() {
         const form = $(`#${subscriptionsEntityName}`);
         async function formSubmitHandler(e) {
             e.preventDefault();
             toggleLoadingSpinner(true);
             if (this.checkValidity()) {
-                await handleCoupon(previousCoupon)
-                await handleCreditType()
+                await Promise.all([
+                    handleCoupon(),
+                    handleCreditType(),
+                    createInvoice()
+                ]);
                 form.off('submit', formSubmitHandler);
                 this.submit();
             } else {
@@ -211,8 +218,94 @@
             console.log(JSON.parse(creditChargeDataInput.val()));
         }
     }
+    async function createInvoice() {
+        const invoiceItemsData = getInvoiceItemsData();
+        const clientData = await getClientData($('#client_id').val());
+        try {
+            const response = await fetch("/api2/invoices", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "accept": "application/json",
+                },
+                body: JSON.stringify({
+                    Invoice: {
+                        store_id: 1,
+                        client_id: clientData['id'],
+                        discount_amount: $('#discount_value').val(),
+                        client_email: clientData['email'],
+                        is_offline: 1,
+                        shipping_tax_id: 2,
+                    },
+                    InvoiceItem: invoiceItemsData
+                }),
+            })
+                .then((response) => response.json())
+                .then((result) => {
+                    console.log(result)
+                    $('#invoice_id').val(result['id']);
+                })
+                .catch((error) => console.log("error", error));
+        } catch (error) {
+            console.log(error);
+        }
+    }
+    function getInvoiceItemsData() {
+        const items = $('select[id*="item_id"]')
+        const itemsData = []
+        items.each(function () {
+            const itemId = $(this).val();
+            const itemQuantity = $(this).closest('.sortable-dynamic-rows-row').find('input[id*="quantity"]').val();
+            const itemPrice = findPriceForQuantity(itemQuantity, pricingData) / itemQuantity
+            console.log(itemPrice);
+            itemsData.push({
+                product_id: itemId,
+                quantity: itemQuantity,
+                unit_price: itemPrice,
+                tax1: $('#tax_type').val(),
+            });
+        })
+        return itemsData
+    }
+    async function getClientData(clientId) {
+        const response = await fetch(`/v2/api/entity/client/${clientId}`)
+        const data = await response.json()
+        return data
+    }
 
-    // Get Weight Data
+    // Check If Invoice Is Deleted
+    async function checkIfInvoiceIsDeleted() {
+        toggleLoadingSpinner(true);
+        const invoiceId = $('#invoice_id').val();
+        try {
+            const response = await fetch(`/api2/invoices/${invoiceId}`);
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Server Error: ${response.status} - ${errorText}`);
+            }
+            const result = await response.json();
+            if (result?.data?.Invoice) {
+                handleInvoiceNotDeleted();
+            } else {
+                console.log("Invoice is deleted");
+            }
+        } catch (error) {
+            console.error("Error checking invoice:", error);
+        }
+        toggleLoadingSpinner(false);
+    }
+    function handleInvoiceNotDeleted() {
+        const invoiceId = $('#invoice_id').val();
+        alert('لا يمكن تعديل الاشتراك لأنه مرتبط بفاتورة موجودة بالفعل. يرجى حذف الفاتورة المرتبطة أولاً، معرف الفاتورة هو: ' + invoiceId);
+        window.location.href = document.referrer;
+    }
+
+    // Get Pricing Data
+    async function getPricingData() {
+        const weightId = $('#weight_unit').val();
+        const weightData = await getWeightData(weightId);
+        pricingData = weightData['le_pricinig_le_pricinig_pricing_form'] || [];
+    }
     async function getWeightData(weightId) {
         const response = await fetch(`/v2/api/entity/${pricingEntityName}/${weightId}`);
         const data = await response.json();
@@ -470,40 +563,35 @@
     }
     async function recalculateTotals() {
         toggleLoadingSpinner(true)
-        const weightId = $('#weight_unit').val();
-        if (weightId) {
-            const weightData = await getWeightData(weightId);
-            const pricingData = weightData['le_pricinig_le_pricinig_pricing_form'] || [];
-            const quantityValues = getAllQuantityValues();
-            const subtotal = calculateSubtotal(quantityValues, pricingData);
-            let taxValue
-            let isTaxIncluded = false
-            const taxId = $('#tax_type').val()
-            let discountValue;
-            const couponData = await getCouponData()
-            console.log(couponData);
-            if (couponData) {
-                const isValidCoupon = await validateCoupon(couponData)
-                console.log(isValidCoupon);
-                if (isValidCoupon) {
-                    discountValue = await getDiscountValue(couponData, pricingData)
-                } else {
-                    await disableCoupon(couponData)
-                    discountValue = 0
-                }
+        const quantityValues = getAllQuantityValues();
+        const subtotal = calculateSubtotal(quantityValues, pricingData);
+        let taxValue
+        let isTaxIncluded = false
+        const taxId = $('#tax_type').val()
+        let discountValue;
+        const couponData = await getCouponData()
+        console.log(couponData);
+        if (couponData) {
+            const isValidCoupon = await validateCoupon(couponData)
+            console.log(isValidCoupon);
+            if (isValidCoupon) {
+                discountValue = await getDiscountValue(couponData, pricingData)
             } else {
+                await disableCoupon(couponData)
                 discountValue = 0
             }
-            console.log(discountValue);
-            if (taxId) {
-                const taxData = await getTaxData(taxId)
-                taxValue = getTaxValue(taxData, subtotal - discountValue)
-                isTaxIncluded = !!taxData['included']
-            } else {
-                taxValue = 0;
-            }
-            updateTotalFields(subtotal, parseFloat(taxValue), parseFloat(discountValue), isTaxIncluded);
+        } else {
+            discountValue = 0
         }
+        console.log(discountValue);
+        if (taxId) {
+            const taxData = await getTaxData(taxId)
+            taxValue = getTaxValue(taxData, subtotal - discountValue)
+            isTaxIncluded = !!taxData['included']
+        } else {
+            taxValue = 0;
+        }
+        updateTotalFields(subtotal, parseFloat(taxValue), parseFloat(discountValue), isTaxIncluded);
         toggleLoadingSpinner(false)
     }
 

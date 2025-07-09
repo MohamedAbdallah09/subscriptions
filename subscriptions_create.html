@@ -11,6 +11,7 @@
     const couponsEntityName = 'le_discount_coupons'
     const allowedClientsToCouponsEntityName = 'le_coupons_allowed_clients'
     const creditsTypesEntityName = 'le_credits_types'
+    let pricingData;
     $(document).ready(function () {
         disableUnneeded()
         initProductAlreadyAddedHandler()
@@ -54,8 +55,11 @@
             e.preventDefault();
             toggleLoadingSpinner(true);
             if (this.checkValidity() && checkDisabledInputs()) {
-                await handleCoupon()
-                await handleCreditType()
+                await Promise.all([
+                    handleCoupon(),
+                    handleCreditType(),
+                    createInvoice()
+                ]);
                 form.off('submit', formSubmitHandler);
                 this.submit();
             } else {
@@ -222,6 +226,55 @@
             creditChargeDataInput.val(JSON.stringify(creditChargeData));
         }
     }
+    async function createInvoice() {
+        const invoiceItemsData = getInvoiceItemsData();
+        const clientData = await getClientData($('#client_id').val());
+        try {
+            const response = await fetch("/api2/invoices", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "accept": "application/json",
+                },
+                body: JSON.stringify({
+                    Invoice: {
+                        store_id: 1,
+                        client_id: clientData['id'],
+                        discount_amount: $('#discount_value').val(),
+                        client_email: clientData['email'],
+                        is_offline: 1,
+                        shipping_tax_id: 2,
+                    },
+                    InvoiceItem: invoiceItemsData
+                }),
+            })
+                .then((response) => response.json())
+                .then((result) => {
+                    console.log(result)
+                    $('#invoice_id').val(result['id']);
+                })
+                .catch((error) => console.log("error", error));
+        } catch (error) {
+            console.log(error);
+        }
+    }
+    function getInvoiceItemsData() {
+        const items = $('select[id*="item_id"]')
+        const itemsData = []
+        items.each(function () {
+            const itemId = $(this).val();
+            const itemQuantity = $(this).closest('.sortable-dynamic-rows-row').find('input[id*="quantity"]').val();
+            const itemPrice = findPriceForQuantity(itemQuantity, pricingData) / itemQuantity
+            console.log(itemPrice);
+            itemsData.push({
+                product_id: itemId,
+                quantity: itemQuantity,
+                unit_price: itemPrice,
+                tax1: $('#tax_type').val(),
+            });
+        })
+        return itemsData
+    }
 
     // Handle Client Change Functions
     async function initClientChangeHandler() {
@@ -286,6 +339,8 @@
         const weightSelect = $('#weight_unit');
         weightSelect.on('change', async function () {
             initQuantityInputChangeHandler();
+            const weightData = await getWeightData($(this).val());
+            pricingData = weightData['le_pricinig_le_pricinig_pricing_form'] || [];
             recalculateTotals();
         });
     }
@@ -472,8 +527,8 @@
         toggleLoadingSpinner(true)
         const weightId = $('#weight_unit').val();
         if (weightId) {
-            const weightData = await getWeightData(weightId);
-            const pricingData = weightData['le_pricinig_le_pricinig_pricing_form'] || [];
+            // const weightData = await getWeightData(weightId);
+            // const pricingData = weightData['le_pricinig_le_pricinig_pricing_form'] || [];
             const quantityValues = getAllQuantityValues();
             const subtotal = calculateSubtotal(quantityValues, pricingData);
             let taxValue
