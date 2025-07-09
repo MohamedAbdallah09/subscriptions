@@ -42,14 +42,14 @@
     })
 
     // Handle Save Subscription functions
-    function initSaveHandler() {
+    function initSaveHandler(previousCoupon) {
         const form = $(`#${subscriptionsEntityName}`);
         async function formSubmitHandler(e) {
             e.preventDefault();
             toggleLoadingSpinner(true);
             if (this.checkValidity()) {
                 await Promise.all([
-                    handleCoupon(),
+                    handleCoupon(previousCoupon),
                     handleCreditType(),
                     createInvoice()
                 ]);
