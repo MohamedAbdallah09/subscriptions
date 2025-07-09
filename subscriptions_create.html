@@ -1,7 +1,8 @@
 <!-- owner_entity_le_subscriptions_create -->
 <style>
     .container-credit_charge_id,
-    .container-status {
+    .container-status,
+    .container-invoice_id {
         display: none;
     }
 </style>
@@ -339,7 +340,9 @@
         const weightSelect = $('#weight_unit');
         weightSelect.on('change', async function () {
             initQuantityInputChangeHandler();
+            toggleLoadingSpinner(true)
             const weightData = await getWeightData($(this).val());
+            toggleLoadingSpinner(false)
             pricingData = weightData['le_pricinig_le_pricinig_pricing_form'] || [];
             recalculateTotals();
         });
